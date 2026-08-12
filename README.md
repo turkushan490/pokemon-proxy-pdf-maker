@@ -18,9 +18,12 @@ laid out on **Letter or A4** paper, ready to print and cut.
 
 ## ✨ Features
 
-- 🖱️ **One-click GUI** — no Python, no terminal, no setup
-- 🌐 Downloads the **real card images** straight from Limitless
+- 🖱️ **One-click GUI** — no Python, no terminal, no setup (dark GitHub-style theme)
+- 🔍 **High-resolution card art** — pulls the sharp `~733×1024` "hires" images from
+  pokemontcg.io first (≈2.5× the pixels of the old `460×640` Limitless art),
+  with Limitless as an automatic fallback
 - 📄 **Letter *or* A4** paper size (plus other card sizes)
+- 🧩 **Borderless mode** — denser layout that fits more cards per page
 - 🖼️ Optional custom **card back** image
 - 📂 Saves the PDF wherever you want (default: `Desktop\Pokemon Proxies\`)
 - ⌨️ Hidden **command-line mode** for power users
@@ -34,7 +37,7 @@ laid out on **Letter or A4** paper, ready to print and cut.
 2. Double-click it.
 3. **Browse…** to your decklist `.txt` (see [format](#-decklist-format) below).
 4. *(Optional)* pick a card-back image and an output folder.
-5. Choose **Paper size: Letter or A4**.
+5. Choose **Paper size: Letter or A4**, and optionally tick **Borderless**.
 6. Click **Make PDF**. It downloads the cards and builds the PDF, then offers
    to open it.
 
@@ -79,10 +82,10 @@ Energy: 1
 ## 🖥️ Command-line mode (optional)
 
 ```bat
-"Pokemon PDF Maker.exe" --cli deck.txt --out "C:\folder" --paper a4
+"Pokemon PDF Maker.exe" --cli deck.txt --out "C:\folder" --paper a4 --borderless
 ```
 
-Options: `--out FOLDER`  `--paper letter|a4`  `--card standard`  `--back image.png`
+Options: `--out FOLDER`  `--paper letter|a4`  `--card standard`  `--back image.png`  `--borderless`
 
 ---
 
