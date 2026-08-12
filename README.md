@@ -23,6 +23,7 @@ laid out on **Letter or A4** paper, ready to print and cut.
   pokemontcg.io first (≈2.5× the pixels of the old `460×640` Limitless art),
   with Limitless as an automatic fallback
 - 📄 **Letter *or* A4** paper size (plus other card sizes)
+- 📐 **Custom card size** — type any width × height in mm; the layout auto-fits
 - 🧩 **Borderless mode** — denser layout that fits more cards per page
 - 🖼️ Optional custom **card back** image
 - 📂 Saves the PDF wherever you want (default: `Desktop\Pokemon Proxies\`)
@@ -82,10 +83,14 @@ Energy: 1
 ## 🖥️ Command-line mode (optional)
 
 ```bat
-"Pokemon PDF Maker.exe" --cli deck.txt --out "C:\folder" --paper a4 --borderless
+"Pokemon PDF Maker.exe" --cli deck.txt --out "C:\folder" --paper a4 --card-mm 60x85 --borderless
 ```
 
-Options: `--out FOLDER`  `--paper letter|a4`  `--card standard`  `--back image.png`  `--borderless`
+Options: `--out FOLDER`  `--paper letter|a4`  `--card standard`  `--card-mm 60x85`  `--back image.png`  `--borderless`
+
+> **Custom size:** in the GUI, choose **Card size → custom** and type the width ×
+> height in mm. On the command line use `--card-mm WxH` (e.g. `--card-mm 60x85`).
+> The app picks the orientation that fits the most cards per page.
 
 ---
 

@@ -13,6 +13,7 @@ Built to be packaged into a single Windows .exe with PyInstaller.
 
 import os
 import sys
+import json
 import queue
 import shutil
 import threading
@@ -162,9 +163,45 @@ def default_output_dir() -> str:
     return out
 
 
+CUSTOM_CARD = "custom"          # value shown in the UI
+_CUSTOM_INTERNAL = "__custom__"  # internal card-size key injected into the layout
+
+
+def _best_orientation(w_mm: float, h_mm: float, paper: str, borderless: bool):
+    """Return (orientation, cards_per_page) that fits the most custom-size cards."""
+    import utilities as U
+    import page_manager as PM
+    import size_convert as SC
+    from enums import Orientation
+
+    cfg = U.load_layout_config()
+    paper = U.resolve_paper_size_alias(cfg, paper)
+    pdef = cfg.paper_sizes[paper]
+    reg = cfg.defaults.registration
+    inset = reg.borderless.inset if borderless else reg.default.inset
+    length = f"{SC.size_to_mm(reg.default.length) + PM.REG_PADDING_MM}mm"
+
+    best = ("portrait", 0)
+    for ori in (Orientation.PORTRAIT, Orientation.LANDSCAPE):
+        try:
+            c = PM.generate_layout(orientation=ori, card_width=f"{w_mm}mm",
+                                   card_height=f"{h_mm}mm", paper_width=pdef.width,
+                                   paper_height=pdef.height, inset=inset,
+                                   length=length, ppi=cfg.ppi)
+            n = len(c.x_pos) * len(c.y_pos)
+        except Exception:
+            n = 0
+        if n > best[1]:
+            best = (ori.value, n)
+    return best
+
+
 def make_pdf(deck: str, back: str, outdir: str, paper: str, card: str,
-             borderless: bool = False, log=print) -> str | None:
+             borderless: bool = False, custom_size=None, log=print) -> str | None:
     """Core job shared by the GUI and CLI: fetch card images, build the PDF.
+
+    `custom_size` is an optional (width_mm, height_mm) tuple, used when
+    `card == "custom"`.
 
     Returns the output PDF path on success, or None on failure.
     """
@@ -203,35 +240,69 @@ def make_pdf(deck: str, back: str, outdir: str, paper: str, card: str,
         return None
     log(f"\n>>> Downloaded {n} card images.\n>>> Building PDF…\n")
 
-    # 2) Build the PDF
+    # 2a) Custom card size: inject a temporary layout the engine can auto-fit.
+    card_size = card
+    prev_env = os.environ.get("SCM_EXTRA_LAYOUTS")
+    if card == CUSTOM_CARD:
+        if not custom_size:
+            log("\nCustom card size selected but no dimensions were given.\n")
+            return None
+        w_mm, h_mm = custom_size
+        ori, per_page = _best_orientation(w_mm, h_mm, paper, borderless)
+        if per_page == 0:
+            log(f"\nThose custom dimensions ({w_mm}×{h_mm} mm) don't fit on {paper}.\n")
+            return None
+        variant_def = {"orientation": ori, "version": 1, "registration": {"length": "8mm"}}
+        extra = {
+            "card_sizes": {_CUSTOM_INTERNAL: {"width": f"{w_mm}mm", "height": f"{h_mm}mm"}},
+            "layouts": {paper: {_CUSTOM_INTERNAL: {"default": variant_def,
+                                                   "borderless": variant_def}}},
+        }
+        extra_path = os.path.join(work, "extra_layout.json")
+        with open(extra_path, "w") as ef:
+            json.dump(extra, ef)
+        os.environ["SCM_EXTRA_LAYOUTS"] = extra_path
+        card_size = _CUSTOM_INTERNAL
+        log(f">>> Custom card size {w_mm}×{h_mm} mm on {paper}: "
+            f"{per_page} cards/page ({ori}).\n")
+
+    # 2b) Build the PDF
     output_pdf = os.path.join(outdir, deck_name + ".pdf")
-    generate_pdf(
-        front_dir_path=front_dir,
-        back_dir_path=back_dir,
-        ds_dir_path=ds_dir,
-        output_path=output_pdf,
-        output_images=False,
-        card_size=card,
-        paper_size=paper,
-        registration=Registration.THREE.value,
-        only_fronts=False,
-        fit=FitMode.STRETCH.value,
-        fit_backs=None,
-        crop_string=None,
-        crop_backs_string=None,
-        extend_edges=None,
-        extend_edges_backs=None,
-        extend_corners=None,
-        extend_corners_backs=None,
-        extend_bleed=None,
-        extend_bleed_backs=None,
-        ppi=300,
-        quality=100,
-        skip_indices=[],
-        load_offset=False,
-        label=None,
-        borderless=borderless,
-    )
+    try:
+        generate_pdf(
+            front_dir_path=front_dir,
+            back_dir_path=back_dir,
+            ds_dir_path=ds_dir,
+            output_path=output_pdf,
+            output_images=False,
+            card_size=card_size,
+            paper_size=paper,
+            registration=Registration.THREE.value,
+            only_fronts=False,
+            fit=FitMode.STRETCH.value,
+            fit_backs=None,
+            crop_string=None,
+            crop_backs_string=None,
+            extend_edges=None,
+            extend_edges_backs=None,
+            extend_corners=None,
+            extend_corners_backs=None,
+            extend_bleed=None,
+            extend_bleed_backs=None,
+            ppi=300,
+            quality=100,
+            skip_indices=[],
+            load_offset=False,
+            label=None,
+            borderless=borderless,
+        )
+    finally:
+        # Restore the environment so a custom run never leaks into the next one
+        if prev_env is None:
+            os.environ.pop("SCM_EXTRA_LAYOUTS", None)
+        else:
+            os.environ["SCM_EXTRA_LAYOUTS"] = prev_env
+
     log(f"\n>>> Done! PDF saved to:\n{output_pdf}\n")
     return output_pdf
 
@@ -265,6 +336,8 @@ class App:
         self.output_dir = tk.StringVar(value=default_output_dir())
         self.paper_size = tk.StringVar(value="letter")
         self.card_size = tk.StringVar(value="standard")
+        self.custom_w = tk.StringVar(value="63")
+        self.custom_h = tk.StringVar(value="88")
         self.borderless = tk.BooleanVar(value=False)
 
         self._apply_theme()
@@ -377,17 +450,38 @@ class App:
         ttk.Combobox(opt, textvariable=self.paper_size, values=["letter", "a4"],
                      width=9, state="readonly").grid(row=0, column=1, sticky="w", padx=(0, 20))
         ttk.Label(opt, text="Card size", style="Card.TLabel").grid(row=0, column=2, sticky="w", padx=(0, 6))
-        ttk.Combobox(opt, textvariable=self.card_size,
-                     values=["standard", "japanese", "poker", "bridge"],
-                     width=12, state="readonly").grid(row=0, column=3, sticky="w")
+        card_cb = ttk.Combobox(opt, textvariable=self.card_size,
+                     values=["standard", "japanese", "poker", "bridge", CUSTOM_CARD],
+                     width=12, state="readonly")
+        card_cb.grid(row=0, column=3, sticky="w")
+        card_cb.bind("<<ComboboxSelected>>", lambda e: self._sync_custom_state())
+
+        # Custom size row (enabled only when card size == "custom")
+        self.custom_row = ttk.Frame(opt, style="Card.TFrame")
+        self.custom_row.grid(row=1, column=0, columnspan=4, sticky="w", pady=(10, 0))
+        ttk.Label(self.custom_row, text="Custom size", style="Card.TLabel").pack(side="left", padx=(0, 8))
+        self.custom_w_entry = ttk.Entry(self.custom_row, textvariable=self.custom_w, width=6)
+        self.custom_w_entry.pack(side="left")
+        ttk.Label(self.custom_row, text="×", style="Card.TLabel").pack(side="left", padx=6)
+        self.custom_h_entry = ttk.Entry(self.custom_row, textvariable=self.custom_h, width=6)
+        self.custom_h_entry.pack(side="left")
+        ttk.Label(self.custom_row, text="mm  (width × height)", style="MutedCard.TLabel").pack(side="left", padx=(8, 0))
+
         ttk.Checkbutton(opt, text="Borderless (fit more cards per page)",
                         variable=self.borderless, style="Card.TCheckbutton"
-                        ).grid(row=1, column=0, columnspan=4, sticky="w", pady=(12, 0))
+                        ).grid(row=2, column=0, columnspan=4, sticky="w", pady=(12, 0))
         ttk.Label(opt, style="MutedCard.TLabel", wraplength=680, justify="left",
                   text="Borderless uses a denser layout (e.g. 3×3 instead of 4×2 on Letter). "
                        "For cutting you'll need the matching borderless templates from the "
                        "silhouette-card-maker project."
-                  ).grid(row=2, column=0, columnspan=4, sticky="w", pady=(2, 0))
+                  ).grid(row=3, column=0, columnspan=4, sticky="w", pady=(2, 0))
+        self._sync_custom_state()
+
+    def _sync_custom_state(self):
+        """Enable the custom width/height fields only when 'custom' is chosen."""
+        state = "normal" if self.card_size.get() == CUSTOM_CARD else "disabled"
+        self.custom_w_entry.configure(state=state)
+        self.custom_h_entry.configure(state=state)
 
         # Action button
         self.run_btn = ttk.Button(self.root, text="Make PDF", style="Accent.TButton",
@@ -460,6 +554,17 @@ class App:
         outdir = self.output_dir.get().strip() or default_output_dir()
         back = self.back_path.get().strip()
 
+        custom_size = None
+        if self.card_size.get() == CUSTOM_CARD:
+            try:
+                custom_size = (float(self.custom_w.get()), float(self.custom_h.get()))
+                if custom_size[0] <= 0 or custom_size[1] <= 0:
+                    raise ValueError
+            except ValueError:
+                messagebox.showerror(APP_TITLE,
+                                     "Enter a valid custom size in mm (e.g. 63 × 88).")
+                return
+
         self.run_btn.configure(state="disabled")
         self.progress.start(12)
         self._log_write("\n" + "=" * 60 + "\nStarting…\n")
@@ -467,19 +572,20 @@ class App:
         self.worker = threading.Thread(
             target=self._run_job,
             args=(deck, back, outdir, self.paper_size.get(), self.card_size.get(),
-                  self.borderless.get()),
+                  self.borderless.get(), custom_size),
             daemon=True,
         )
         self.worker.start()
 
     def _run_job(self, deck: str, back: str, outdir: str, paper: str, card: str,
-                 borderless: bool):
+                 borderless: bool, custom_size):
         old_stdout, old_stderr = sys.stdout, sys.stderr
         sys.stdout = sys.stderr = StdoutRedirector(self.log_queue)
         result_pdf = None
         try:
             result_pdf = make_pdf(deck, back, outdir, paper, card,
-                                  borderless=borderless, log=print)
+                                  borderless=borderless, custom_size=custom_size,
+                                  log=print)
         except Exception:
             print("\n!!! Something went wrong:\n")
             print(traceback.format_exc())
@@ -510,7 +616,10 @@ def run_cli(argv) -> int:
     p.add_argument("deck", help="Path to the decklist .txt file (Limitless format)")
     p.add_argument("--out", default=default_output_dir(), help="Output folder")
     p.add_argument("--paper", default="letter", help="Paper size (e.g. letter, a4)")
-    p.add_argument("--card", default="standard", help="Card size (default: standard)")
+    p.add_argument("--card", default="standard",
+                   help="Card size name (default: standard), or 'custom' with --card-mm.")
+    p.add_argument("--card-mm", default="",
+                   help="Custom card size in mm as WxH, e.g. 60x85. Implies --card custom.")
     p.add_argument("--back", default="", help="Optional card back image")
     p.add_argument("--borderless", action="store_true",
                    help="Denser layout that fits more cards per page (needs borderless cutting templates).")
@@ -519,9 +628,21 @@ def run_cli(argv) -> int:
     if not os.path.isfile(args.deck):
         print(f"Decklist not found: {args.deck}")
         return 2
+
+    card = args.card
+    custom_size = None
+    if args.card_mm:
+        try:
+            w, h = (float(x) for x in args.card_mm.lower().replace("mm", "").split("x"))
+            custom_size = (w, h)
+            card = CUSTOM_CARD
+        except Exception:
+            print(f"Invalid --card-mm value '{args.card_mm}'. Use WxH, e.g. 60x85.")
+            return 2
+
     try:
-        pdf = make_pdf(args.deck, args.back, args.out, args.paper, args.card,
-                       borderless=args.borderless, log=print)
+        pdf = make_pdf(args.deck, args.back, args.out, args.paper, card,
+                       borderless=args.borderless, custom_size=custom_size, log=print)
     except Exception:
         print(traceback.format_exc())
         return 1
