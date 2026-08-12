@@ -1,0 +1,16 @@
+# Python / build artifacts
+__pycache__/
+*.pyc
+.venv/
+venv/
+build/
+dist/
+*.spec
+
+# The upstream project is cloned here by the build script — don't commit it
+silhouette-card-maker/
+
+# Local test output
+Pokemon Proxies/
+_work_*/
+*.pdf

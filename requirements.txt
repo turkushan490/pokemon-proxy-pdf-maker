@@ -1,0 +1,12 @@
+# Runtime dependencies for the wrapper + the silhouette-card-maker Pokemon/PDF path.
+# (A subset of the full upstream requirements.txt — only what fetch + create_pdf need.)
+click
+cloudscraper
+requests
+filetype
+natsort
+numpy
+pillow
+pydantic
+pypdfium2
+matplotlib

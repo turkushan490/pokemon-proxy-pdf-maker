@@ -1,0 +1,17 @@
+Pokémon: 6
+3 Charcadet SSP 32
+1 Charcadet PAR 26
+3 Ceruledge ex SSP 36
+2 Solrock MEG 75
+2 Lunatone MEG 74
+1 Squawkabilly ex PAL 169
+
+Trainer: 8
+3 Carmine TWM 145
+3 Boss's Orders MEG 114
+2 Professor's Research JTG 155
+4 Ultra Ball MEG 131
+4 Nest Ball SVI 181
+
+Energy: 1
+6 Basic Fire Energy SVE 10
