@@ -82,42 +82,73 @@ _MODERN_SET_MAP = {
 }
 
 
-def _fetch_card_hires(index, quantity, card_name, set_id, card_number, front_img_dir):
-    """High-resolution replacement for limitless.fetch_card (hires CDN first)."""
-    L = _limitless
-    card_art = None
+# Which image source to try first. "highest" = sharp pokemontcg.io hires
+# (~733x1024); "standard" = original Limitless CDN (~460x640, smaller/faster).
+# Set by make_pdf() before each run; defaults to the best quality.
+QUALITY_HIGHEST = "highest"
+QUALITY_STANDARD = "standard"
+_IMAGE_QUALITY = QUALITY_HIGHEST
 
-    # 1) High-res pokemontcg.io "_hires" CDN (precise: set + number)
+
+def _src_pokemontcg_hires(L, card_name, set_id, card_number):
     if set_id in L.LIMITLESS_TO_POKEMONTCG_SET_ID:
         try:
             pid = L.LIMITLESS_TO_POKEMONTCG_SET_ID[set_id]
             url = L.POKEMONTCG_IMAGE_URL_TEMPLATE.format(set_id=pid, card_no=card_number)
-            card_art = L.request_pokemontcg(url).content
+            return L.request_pokemontcg(url).content
         except HTTPError:
             pass
+    return None
 
-    # 2) Limitless TCG CDN (lower-res fallback)
-    if card_art is None and set_id not in L._failed_tcg_sets:
+
+def _src_limitless_tcg(L, card_name, set_id, card_number):
+    if set_id not in L._failed_tcg_sets:
         try:
             url = L.LIMITLESS_TCG_URL_TEMPLATE.format(set_id=set_id, card_no=str(card_number).zfill(3))
-            card_art = L.request_limitless(url).content
+            return L.request_limitless(url).content
         except HTTPError:
             L._failed_tcg_sets.add(set_id)
+    return None
 
-    # 3) Pokemon Pocket format
-    if card_art is None and set_id not in L._failed_pocket_sets:
+
+def _src_limitless_pocket(L, card_name, set_id, card_number):
+    if set_id not in L._failed_pocket_sets:
         try:
             url = L.LIMITLESS_POCKET_URL_TEMPLATE.format(set_id=set_id, card_no=str(card_number).zfill(3))
-            card_art = L.request_limitless(url).content
+            return L.request_limitless(url).content
         except HTTPError:
             L._failed_pocket_sets.add(set_id)
+    return None
 
-    # 4) pokemontcg.io search API (by name + number)
-    if card_art is None:
+
+def _src_pokemontcg_search(L, card_name, set_id, card_number):
+    return L.fetch_card_from_pokemontcg(card_name, card_number)
+
+
+def _fetch_card_hires(index, quantity, card_name, set_id, card_number, front_img_dir):
+    """Replacement for limitless.fetch_card with a selectable source order."""
+    L = _limitless
+
+    if _IMAGE_QUALITY == QUALITY_STANDARD:
+        # Original behaviour: Limitless first, pokemontcg.io as fallback.
+        sources = [_src_limitless_tcg, _src_limitless_pocket,
+                   _src_pokemontcg_hires, _src_pokemontcg_search]
+    else:
+        # Highest quality: sharp pokemontcg.io hires first, Limitless fallback.
+        sources = [_src_pokemontcg_hires, _src_limitless_tcg,
+                   _src_limitless_pocket, _src_pokemontcg_search]
+
+    card_art = None
+    for src in sources:
         try:
-            card_art = L.fetch_card_from_pokemontcg(card_name, card_number)
-        except Exception as e:
-            raise Exception(f'Failed to fetch card "{card_name}" (set: {set_id}, number: {card_number}): {e}')
+            card_art = src(L, card_name, set_id, card_number)
+        except Exception:
+            card_art = None
+        if card_art is not None:
+            break
+
+    if card_art is None:
+        raise Exception(f'Failed to fetch card "{card_name}" (set: {set_id}, number: {card_number})')
 
     file_ext = filetype.guess(card_art).extension
     for counter in range(quantity):
@@ -197,14 +228,18 @@ def _best_orientation(w_mm: float, h_mm: float, paper: str, borderless: bool):
 
 
 def make_pdf(deck: str, back: str, outdir: str, paper: str, card: str,
-             borderless: bool = False, custom_size=None, log=print) -> str | None:
+             borderless: bool = False, custom_size=None,
+             image_quality: str = QUALITY_HIGHEST, log=print) -> str | None:
     """Core job shared by the GUI and CLI: fetch card images, build the PDF.
 
     `custom_size` is an optional (width_mm, height_mm) tuple, used when
-    `card == "custom"`.
+    `card == "custom"`. `image_quality` is "highest" (sharp pokemontcg.io hires,
+    the default) or "standard" (original Limitless images).
 
     Returns the output PDF path on success, or None on failure.
     """
+    global _IMAGE_QUALITY
+    _IMAGE_QUALITY = QUALITY_STANDARD if image_quality == QUALITY_STANDARD else QUALITY_HIGHEST
     deck_name = os.path.splitext(os.path.basename(deck))[0]
     work = os.path.join(outdir, "_work_" + deck_name)
     front_dir = os.path.join(work, "front")
@@ -228,8 +263,10 @@ def make_pdf(deck: str, back: str, outdir: str, paper: str, card: str,
     if back and os.path.isfile(back):
         shutil.copy2(back, os.path.join(back_dir, os.path.basename(back)))
 
-    # 1) Fetch card images from Limitless
-    log(">>> Downloading card images from Limitless…\n")
+    # 1) Fetch card images
+    _q = "highest quality (pokemontcg.io hi-res)" if _IMAGE_QUALITY == QUALITY_HIGHEST \
+        else "standard quality (Limitless)"
+    log(f">>> Downloading card images — {_q}…\n")
     with open(deck, "r", encoding="utf-8") as fh:
         deck_text = fh.read()
     parse_deck(deck_text, DeckFormat.LIMITLESS, get_handle_card(front_dir))
@@ -336,6 +373,7 @@ class App:
         self.output_dir = tk.StringVar(value=default_output_dir())
         self.paper_size = tk.StringVar(value="letter")
         self.card_size = tk.StringVar(value="standard")
+        self.quality = tk.StringVar(value="highest")
         self.custom_w = tk.StringVar(value="63")
         self.custom_h = tk.StringVar(value="88")
         self.borderless = tk.BooleanVar(value=False)
@@ -467,14 +505,23 @@ class App:
         self.custom_h_entry.pack(side="left")
         ttk.Label(self.custom_row, text="mm  (width × height)", style="MutedCard.TLabel").pack(side="left", padx=(8, 0))
 
+        # Image quality
+        ttk.Label(opt, text="Image quality", style="Card.TLabel").grid(row=2, column=0, sticky="w", padx=(0, 6), pady=(12, 0))
+        ttk.Combobox(opt, textvariable=self.quality, values=["highest", "standard"],
+                     width=12, state="readonly").grid(row=2, column=1, sticky="w", pady=(12, 0))
+        ttk.Label(opt, style="MutedCard.TLabel", wraplength=680, justify="left",
+                  text="highest = sharp pokemontcg.io art (~733×1024). "
+                       "standard = smaller Limitless art (~460×640), faster / smaller file."
+                  ).grid(row=3, column=0, columnspan=4, sticky="w", pady=(2, 0))
+
         ttk.Checkbutton(opt, text="Borderless (fit more cards per page)",
                         variable=self.borderless, style="Card.TCheckbutton"
-                        ).grid(row=2, column=0, columnspan=4, sticky="w", pady=(12, 0))
+                        ).grid(row=4, column=0, columnspan=4, sticky="w", pady=(12, 0))
         ttk.Label(opt, style="MutedCard.TLabel", wraplength=680, justify="left",
                   text="Borderless uses a denser layout (e.g. 3×3 instead of 4×2 on Letter). "
                        "For cutting you'll need the matching borderless templates from the "
                        "silhouette-card-maker project."
-                  ).grid(row=3, column=0, columnspan=4, sticky="w", pady=(2, 0))
+                  ).grid(row=5, column=0, columnspan=4, sticky="w", pady=(2, 0))
         self._sync_custom_state()
 
     def _sync_custom_state(self):
@@ -572,20 +619,20 @@ class App:
         self.worker = threading.Thread(
             target=self._run_job,
             args=(deck, back, outdir, self.paper_size.get(), self.card_size.get(),
-                  self.borderless.get(), custom_size),
+                  self.borderless.get(), custom_size, self.quality.get()),
             daemon=True,
         )
         self.worker.start()
 
     def _run_job(self, deck: str, back: str, outdir: str, paper: str, card: str,
-                 borderless: bool, custom_size):
+                 borderless: bool, custom_size, quality: str):
         old_stdout, old_stderr = sys.stdout, sys.stderr
         sys.stdout = sys.stderr = StdoutRedirector(self.log_queue)
         result_pdf = None
         try:
             result_pdf = make_pdf(deck, back, outdir, paper, card,
                                   borderless=borderless, custom_size=custom_size,
-                                  log=print)
+                                  image_quality=quality, log=print)
         except Exception:
             print("\n!!! Something went wrong:\n")
             print(traceback.format_exc())
@@ -621,6 +668,8 @@ def run_cli(argv) -> int:
     p.add_argument("--card-mm", default="",
                    help="Custom card size in mm as WxH, e.g. 60x85. Implies --card custom.")
     p.add_argument("--back", default="", help="Optional card back image")
+    p.add_argument("--image-quality", default="highest", choices=["highest", "standard"],
+                   help="highest = pokemontcg.io hi-res (default); standard = Limitless.")
     p.add_argument("--borderless", action="store_true",
                    help="Denser layout that fits more cards per page (needs borderless cutting templates).")
     args = p.parse_args(argv)
@@ -642,7 +691,8 @@ def run_cli(argv) -> int:
 
     try:
         pdf = make_pdf(args.deck, args.back, args.out, args.paper, card,
-                       borderless=args.borderless, custom_size=custom_size, log=print)
+                       borderless=args.borderless, custom_size=custom_size,
+                       image_quality=args.image_quality, log=print)
     except Exception:
         print(traceback.format_exc())
         return 1

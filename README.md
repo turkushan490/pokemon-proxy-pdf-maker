@@ -22,6 +22,8 @@ laid out on **Letter or A4** paper, ready to print and cut.
 - 🔍 **High-resolution card art** — pulls the sharp `~733×1024` "hires" images from
   pokemontcg.io first (≈2.5× the pixels of the old `460×640` Limitless art),
   with Limitless as an automatic fallback
+- 🎚️ **Image-quality selector** — `highest` (hi-res, the default) or `standard`
+  (smaller/faster Limitless art)
 - 📄 **Letter *or* A4** paper size (plus other card sizes)
 - 📐 **Custom card size** — type any width × height in mm; the layout auto-fits
 - 🧩 **Borderless mode** — denser layout that fits more cards per page
@@ -86,7 +88,7 @@ Energy: 1
 "Pokemon PDF Maker.exe" --cli deck.txt --out "C:\folder" --paper a4 --card-mm 60x85 --borderless
 ```
 
-Options: `--out FOLDER`  `--paper letter|a4`  `--card standard`  `--card-mm 60x85`  `--back image.png`  `--borderless`
+Options: `--out FOLDER`  `--paper letter|a4`  `--card standard`  `--card-mm 60x85`  `--image-quality highest|standard`  `--back image.png`  `--borderless`
 
 > **Custom size:** in the GUI, choose **Card size → custom** and type the width ×
 > height in mm. On the command line use `--card-mm WxH` (e.g. `--card-mm 60x85`).
