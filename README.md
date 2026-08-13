@@ -24,7 +24,10 @@ laid out on **Letter or A4** paper, ready to print and cut.
   with Limitless as an automatic fallback
 - 🎚️ **Image-quality selector** — `highest` (hi-res, the default) or `standard`
   (smaller/faster Limitless art)
-- 📄 **Letter *or* A4** paper size (plus other card sizes)
+- 📄 **Letter *or* A4** paper size
+- 🃏 **19 card sizes** — standard, japanese, poker, bridge, **mini, micro,
+  american_mini, euro_mini**, jumbo, tarot, and more (list comes straight from
+  the engine, so it always matches what actually prints)
 - 📐 **Custom card size** — type any width × height in mm; the layout auto-fits
 - 🧩 **Borderless mode** — denser layout that fits more cards per page
 - 🖼️ Optional custom **card back** image

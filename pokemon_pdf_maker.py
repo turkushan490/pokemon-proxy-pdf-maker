@@ -40,7 +40,7 @@ if BASE_DIR not in sys.path:
 from plugins.pokemon.deck_formats import DeckFormat, parse_deck  # noqa: E402
 from plugins.pokemon.limitless import get_handle_card  # noqa: E402
 from plugins.pokemon import limitless as _limitless  # noqa: E402
-from utilities import ensure_directory, generate_pdf, Registration, FitMode  # noqa: E402
+from utilities import ensure_directory, generate_pdf, Registration, FitMode, load_layout_config  # noqa: E402
 import filetype  # noqa: E402
 from requests.exceptions import HTTPError  # noqa: E402
 
@@ -192,6 +192,34 @@ def default_output_dir() -> str:
     base = desktop if os.path.isdir(desktop) else home
     out = os.path.join(base, "Pokemon Proxies")
     return out
+
+
+# Common sizes first, then the rest; only ones with a real layout are shown.
+_CARD_SIZE_PRIORITY = [
+    "standard", "japanese", "poker", "bridge",
+    "mini", "micro", "american_mini", "euro_mini",
+    "euro_business", "business", "jumbo", "tarot", "catan",
+    "credit", "domino", "domino_square", "bridge_square",
+    "standard_double", "70mm_square",
+]
+
+
+def available_card_sizes(papers=("letter", "a4")):
+    """Card sizes that have a real layout on every offered paper size.
+
+    Read straight from the bundled layout config so the list always matches
+    what the engine can actually produce (mini, micro, jumbo, tarot, …).
+    """
+    try:
+        cfg = load_layout_config()
+    except Exception:
+        return ["standard", "poker", "bridge", "japanese"]
+    sets = [{cs for cs, variants in cfg.layouts.get(p, {}).items() if "default" in variants}
+            for p in papers]
+    common = set.intersection(*sets) if sets else set()
+    ordered = [c for c in _CARD_SIZE_PRIORITY if c in common]
+    ordered += sorted(c for c in common if c not in _CARD_SIZE_PRIORITY)
+    return ordered or ["standard"]
 
 
 CUSTOM_CARD = "custom"          # value shown in the UI
@@ -489,8 +517,8 @@ class App:
                      width=9, state="readonly").grid(row=0, column=1, sticky="w", padx=(0, 20))
         ttk.Label(opt, text="Card size", style="Card.TLabel").grid(row=0, column=2, sticky="w", padx=(0, 6))
         card_cb = ttk.Combobox(opt, textvariable=self.card_size,
-                     values=["standard", "japanese", "poker", "bridge", CUSTOM_CARD],
-                     width=12, state="readonly")
+                     values=available_card_sizes() + [CUSTOM_CARD],
+                     width=15, state="readonly")
         card_cb.grid(row=0, column=3, sticky="w")
         card_cb.bind("<<ComboboxSelected>>", lambda e: self._sync_custom_state())
 
